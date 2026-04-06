@@ -1,0 +1,140 @@
+---
+# OpenEnv Environment Manifest
+# https://github.com/meta-pytorch/OpenEnv
+
+name: clinical-triage-navigator
+version: "1.0.0"
+description: >
+  ER triage simulation for AI agent training and evaluation.
+  Agents assign Emergency Severity Index (ESI) levels to synthetic patients,
+  request appropriate resources, and decide patient disposition.
+  Three tasks (easy → medium → hard) with deterministic graders
+  and rich partial-progress reward shaping.
+
+author: "Clinical Triage Navigator Contributors"
+license: "Apache-2.0"
+
+tags:
+  - healthcare
+  - triage
+  - ESI
+  - emergency-medicine
+  - real-world
+  - multi-step
+  - reward-shaping
+
+# ── API ────────────────────────────────────────────
+action_type: TriageAction
+observation_type: TriageObservation
+state_type: TriageState
+
+action_space:
+  description: >
+    Agent submits a triage decision for the current patient.
+  fields:
+    esi_level:
+      type: integer
+      range: [1, 5]
+      description: "Emergency Severity Index level (1=most critical, 5=least)"
+    resources_requested:
+      type: array[string]
+      description: "Resources the patient needs (IV_ACCESS, LABS, ECG, IMAGING_*, etc.)"
+    clinical_reasoning:
+      type: string
+      description: "Free-text rationale (required for hard task scoring)"
+    disposition:
+      type: string
+      enum: [resus_bay, trauma_bay, monitored_bed, fast_track, waiting_room]
+      description: "Recommended patient placement"
+
+observation_space:
+  description: >
+    After each step, the agent receives feedback on its last decision
+    and the next patient card (or done=true).
+  fields:
+    current_patient:
+      type: PatientCard | null
+      description: "Patient to triage. Null when episode is complete."
+    last_action_feedback:
+      type: string
+      description: "Clinical feedback on the previous triage decision"
+    last_esi_correct:
+      type: boolean | null
+    patients_remaining:
+      type: integer
+    step_reward:
+      type: float
+    cumulative_reward:
+      type: float
+    done:
+      type: boolean
+
+# ── Tasks ──────────────────────────────────────────
+tasks:
+  - name: easy
+    description: "Single patient, clear presentations. 10 cases. ESI 1–5 represented."
+    difficulty: easy
+    n_cases: 10
+    grader: esi_accuracy + resource_correctness + disposition_accuracy
+
+  - name: medium
+    description: "5-patient queue. Mix of emergent and routine cases. Priority ordering matters."
+    difficulty: medium
+    n_cases: 10
+    grader: esi_accuracy + under_triage_penalty + resource_correctness
+
+  - name: hard
+    description: >
+      10-patient mass casualty. Incomplete histories. Ethical complexity.
+      Clinical reasoning scored. Under-triage heavily penalized.
+    difficulty: hard
+    n_cases: 10
+    grader: esi_accuracy + under_triage_penalty + resource_correctness + reasoning_quality
+
+# ── Reward ─────────────────────────────────────────
+reward:
+  range: [-2.0, 1.70]
+  normalized_range: [0.0, 1.0]
+  components:
+    - name: esi_exact_match
+      value: +1.00
+    - name: esi_off_by_1
+      value: +0.40
+    - name: under_triage_1_level
+      value: -0.30
+      note: "Under-triage is clinically dangerous and heavily penalized"
+    - name: under_triage_2_plus
+      value: -0.80 to -1.50
+    - name: resource_correct
+      value: +0.10 per resource
+    - name: resource_false_positive
+      value: -0.05 per resource
+    - name: disposition_correct
+      value: +0.20
+    - name: idle_penalty
+      value: -0.01 per step
+
+# ── Deployment ─────────────────────────────────────
+deployment:
+  sdk: docker
+  port: 8000
+  app_port: 8000
+  base_path: /web
+  env_vars:
+    TRIAGE_TASK:
+      default: easy
+      options: [easy, medium, hard]
+      description: "Which task difficulty to run"
+    ENABLE_WEB_INTERFACE:
+      default: "true"
+      description: "Enable the built-in HTML web interface"
+
+# ── Evaluation ─────────────────────────────────────
+evaluation:
+  baseline_model: gpt-4o-mini
+  baseline_scores:
+    easy: 0.72
+    medium: 0.61
+    hard: 0.48
+  score_endpoint: /score
+  score_range: [0.0, 1.0]
