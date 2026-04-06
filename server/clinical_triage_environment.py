@@ -82,41 +82,63 @@ def _build_patient_card(case_dict: Dict) -> PatientCard:
 
 
 def _esi_accuracy_reward(assigned: int, ground_truth: int) -> float:
-    diff = assigned - ground_truth  # positive = over-triage, negative = under-triage
-    if diff == 0:
-        return 1.00
-    elif abs(diff) == 1:
-        return 0.40
-    elif abs(diff) == 2:
-        return -0.20
+    """
+    Asymmetric reward — under-triage is clinically dangerous and penalised 5× harder.
+
+    delta = assigned − ground_truth
+      negative = over-triage  (agent called MORE urgent than needed — cautious, safe)
+      positive = under-triage (agent called LESS urgent than needed — dangerous)
+
+    delta  | meaning                          | reward
+    -------+----------------------------------+-------
+      0    | perfect                          | +1.0
+     -1    | slight over-triage (cautious)    | +0.5   ← rewarded as safe heuristic
+     -2    | significant over-triage          | -0.2
+    ≤-3    | extreme over-triage              | -0.5
+     +1    | slight under-triage              | -1.0
+     +2    | significant under-triage         | -2.5
+    ≥+3    | critical miss (ESI-1 → ESI 4+)  | -5.0
+    """
+    delta = assigned - ground_truth
+    if delta == 0:
+        return 1.0
+    elif delta == -1:
+        return 0.5
+    elif delta == -2:
+        return -0.2
+    elif delta <= -3:
+        return -0.5
+    elif delta == 1:
+        return -1.0
+    elif delta == 2:
+        return -2.5
+    else:  # delta >= 3
+        return -5.0
+
+
+def _sentinel_reward(sentinel_condition: Optional[str], escalation: str) -> float:
+    """
+    Reward component for sentinel condition escalation.
+    Fires independently of ESI accuracy — you can get the ESI right
+    but still miss the sentinel (and vice versa).
+
+    sentinel_condition  | escalation       | reward
+    --------------------+------------------+-------
+    present             | ACTIVATE_TEAM    | +0.4
+    present             | ALERT_SENIOR     | +0.4
+    present             | NONE             | -3.0  ← missed sentinel
+    None                | ACTIVATE_TEAM    | -0.2  ← false alarm (minor penalty)
+    None                | ALERT_SENIOR     | -0.1  ← false alarm (minor penalty)
+    None                | NONE             |  0.0
+    """
+    if sentinel_condition:
+        return 0.4 if escalation in ("ACTIVATE_TEAM", "ALERT_SENIOR") else -3.0
     else:
-        return -0.60
-
-
-def _under_triage_penalty(assigned: int, ground_truth: int) -> float:
-    """Penalty when agent assigns LOWER severity (higher ESI number) than needed."""
-    under_by = assigned - ground_truth  # positive = agent said less urgent
-    if under_by <= 0:
+        if escalation == "ACTIVATE_TEAM":
+            return -0.2
+        elif escalation == "ALERT_SENIOR":
+            return -0.1
         return 0.0
-    if under_by == 1:
-        return -0.30
-    elif under_by == 2:
-        return -0.80
-    else:
-        return -1.50
-
-
-def _over_triage_penalty(assigned: int, ground_truth: int) -> float:
-    """Small penalty when agent assigns HIGHER severity (lower ESI number) than needed."""
-    over_by = ground_truth - assigned  # positive = agent said more urgent
-    if over_by <= 0:
-        return 0.0
-    if over_by == 1:
-        return -0.10
-    elif over_by == 2:
-        return -0.25
-    else:
-        return -0.50
 
 
 def _resource_reward(requested: List[str], ground_truth: List[str]) -> float:
@@ -140,6 +162,8 @@ def _build_feedback(
     gt_resources: List[str],
     gt_disposition: str,
     step_reward: float,
+    sentinel: Optional[str] = None,
+    r_sentinel: float = 0.0,
 ) -> str:
     lines = []
     diff = action.esi_level - gt_esi
@@ -177,6 +201,18 @@ def _build_feedback(
     else:
         lines.append(f"Disposition: CORRECT — '{action.disposition}'.")
 
+    # Sentinel feedback
+    if sentinel:
+        if action.escalation in ("ACTIVATE_TEAM", "ALERT_SENIOR"):
+            lines.append(f"SENTINEL ESCALATION CORRECT: {sentinel} — {action.escalation} ({r_sentinel:+.1f})")
+        else:
+            lines.append(
+                f"SENTINEL MISSED: Patient has {sentinel} — escalation should be "
+                f"ACTIVATE_TEAM or ALERT_SENIOR, not NONE. Penalty: {r_sentinel:+.1f}"
+            )
+    elif action.escalation != "NONE":
+        lines.append(f"FALSE ESCALATION: No sentinel condition — {action.escalation} penalty ({r_sentinel:+.1f})")
+
     lines.append(f"Step reward: {step_reward:+.2f}")
     return " | ".join(lines)
 
@@ -212,6 +248,8 @@ class ClinicalTriageEnvironment:
         self._correct_count: int = 0
         self._over_triage: int = 0
         self._under_triage: int = 0
+        self._sentinel_total: int = 0
+        self._sentinel_correct: int = 0
         self._done: bool = False
         self._last_obs: Optional[TriageObservation] = None
 
@@ -227,6 +265,8 @@ class ClinicalTriageEnvironment:
         self._correct_count = 0
         self._over_triage = 0
         self._under_triage = 0
+        self._sentinel_total = 0
+        self._sentinel_correct = 0
         self._done = False
 
         obs = self._make_observation(
@@ -250,16 +290,16 @@ class ClinicalTriageEnvironment:
         gt_esi: int = current_case["ground_truth_esi"]
         gt_resources: List[str] = current_case["ground_truth_resources"]
         gt_disposition: str = current_case["ground_truth_disposition"]
+        sentinel: Optional[str] = current_case.get("sentinel_condition")
 
         # ── Compute reward ──────────────────────────────────────
-        r_esi = _esi_accuracy_reward(action.esi_level, gt_esi)
-        r_under = _under_triage_penalty(action.esi_level, gt_esi)
-        r_over = _over_triage_penalty(action.esi_level, gt_esi)
-        r_resources = _resource_reward(action.resources_requested, gt_resources)
+        r_esi        = _esi_accuracy_reward(action.esi_level, gt_esi)
+        r_sentinel   = _sentinel_reward(sentinel, action.escalation)
+        r_resources  = _resource_reward(action.resources_requested, gt_resources)
         r_disposition = _disposition_reward(action.disposition, gt_disposition)
-        r_idle = -0.01  # per-step efficiency penalty
+        r_idle       = -0.01  # per-step efficiency penalty
 
-        step_reward = r_esi + r_under + r_over + r_resources + r_disposition + r_idle
+        step_reward = r_esi + r_sentinel + r_resources + r_disposition + r_idle
 
         # Hard task: bonus for good clinical reasoning (length + keyword heuristic)
         if self._task_name == "hard" and action.clinical_reasoning:
@@ -269,7 +309,7 @@ class ClinicalTriageEnvironment:
         self._cumulative_reward += step_reward
         self._step_count += 1
 
-        # Track accuracy
+        # Track ESI accuracy
         esi_correct = action.esi_level == gt_esi
         if esi_correct:
             self._correct_count += 1
@@ -279,8 +319,15 @@ class ClinicalTriageEnvironment:
         elif diff < 0:
             self._over_triage += 1
 
+        # Track sentinel accuracy
+        if sentinel:
+            self._sentinel_total += 1
+            if action.escalation in ("ACTIVATE_TEAM", "ALERT_SENIOR"):
+                self._sentinel_correct += 1
+
         feedback = _build_feedback(
-            action, gt_esi, gt_resources, gt_disposition, step_reward
+            action, gt_esi, gt_resources, gt_disposition, step_reward,
+            sentinel=sentinel, r_sentinel=r_sentinel,
         )
 
         # Advance queue
@@ -348,15 +395,29 @@ class ClinicalTriageEnvironment:
     def normalized_score(self) -> float:
         """
         Returns final normalized score in [0.0, 1.0] for agent grader.
-        Based on ESI accuracy (70%) + resource appropriateness proxy (30%).
+
+        Task-specific formulas (simplified — no deterioration component yet):
+          easy   : 0.7 × esi_accuracy + 0.3 × sentinel_accuracy
+          medium : 0.6 × esi_accuracy + 0.4 × sentinel_accuracy
+          hard   : 0.55 × esi_accuracy + 0.45 × sentinel_accuracy
         """
         if not self._cases:
             return 0.0
-        n = len(self._cases)
-        esi_score = self._correct_count / n  # fraction exact
-        # Proxy: cumulative reward normalized to max possible
-        # Max reward per patient ≈ 1.00 + 0.50 (resources) + 0.20 (disposition)
-        max_per_patient = 1.70
-        reward_score = max(0.0, self._cumulative_reward) / (n * max_per_patient)
-        combined = 0.70 * esi_score + 0.30 * min(1.0, reward_score)
+        n = self._queue_index or len(self._cases)
+
+        esi_score = self._correct_count / n
+
+        # sentinel_score = 1.0 if no sentinel patients (full marks by default)
+        if self._sentinel_total > 0:
+            sentinel_score = self._sentinel_correct / self._sentinel_total
+        else:
+            sentinel_score = 1.0
+
+        if self._task_name == "easy":
+            combined = 0.7 * esi_score + 0.3 * sentinel_score
+        elif self._task_name == "medium":
+            combined = 0.6 * esi_score + 0.4 * sentinel_score
+        else:  # hard
+            combined = 0.55 * esi_score + 0.45 * sentinel_score
+
         return round(min(1.0, max(0.0, combined)), 4)

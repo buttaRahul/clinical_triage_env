@@ -69,6 +69,10 @@ class PatientCard(BaseModel):
     allergies: List[str] = Field(default_factory=list)
     vitals: VitalSigns
     additional_context: Optional[str] = None
+    sentinel_condition: Optional[str] = Field(
+        default=None,
+        description="Hidden sentinel diagnosis (STEMI/SEPSIS/STROKE/PE/etc). None if not a sentinel case.",
+    )
 
 
 # ─────────────────────────────────────────────
@@ -91,6 +95,11 @@ class TriageAction(BaseModel):
     disposition : str
         Where the patient should go: 'resus_bay', 'trauma_bay',
         'monitored_bed', 'fast_track', 'waiting_room'.
+    escalation : str
+        Whether to escalate this patient to a senior/team.
+        NONE            — standard triage, no escalation needed
+        ACTIVATE_TEAM   — activate resus/trauma/stroke/sepsis team immediately
+        ALERT_SENIOR    — alert senior clinician, high-risk but not immediate team
     """
 
     esi_level: ESILevel
@@ -105,6 +114,10 @@ class TriageAction(BaseModel):
     disposition: Literal[
         "resus_bay", "trauma_bay", "monitored_bed", "fast_track", "waiting_room"
     ] = Field(description="Recommended patient placement")
+    escalation: Literal["NONE", "ACTIVATE_TEAM", "ALERT_SENIOR"] = Field(
+        default="NONE",
+        description="Escalation flag for sentinel conditions (STEMI, sepsis, stroke, PE, etc.)",
+    )
 
 
 # ─────────────────────────────────────────────

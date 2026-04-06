@@ -37,6 +37,7 @@ def _case(
     resources: list,
     disposition: str,
     additional_context: str = "",
+    sentinel_condition: str = None,
 ) -> Dict[str, Any]:
     return {
         "patient_id": patient_id,
@@ -58,6 +59,7 @@ def _case(
             "pain_score": pain,
         },
         "additional_context": additional_context,
+        "sentinel_condition": sentinel_condition,
         "ground_truth_esi": esi,
         "ground_truth_resources": resources,
         "ground_truth_disposition": disposition,
@@ -81,7 +83,8 @@ EASY_CASES: List[Dict[str, Any]] = [
         esi=1,
         resources=["IV_ACCESS", "LABS", "ECG", "BEDSIDE_MONITORING", "MEDICATION_IV"],
         disposition="resus_bay",
-        additional_context="Patient is diaphoretic and pale. ST elevation noted on paramedic ECG."
+        additional_context="Patient is diaphoretic and pale. ST elevation noted on paramedic ECG.",
+        sentinel_condition="STEMI",
     ),
     _case(
         "E002", 34, "F",
@@ -95,7 +98,8 @@ EASY_CASES: List[Dict[str, Any]] = [
         esi=2,
         resources=["IV_ACCESS", "LABS", "IMAGING_CT", "MEDICATION_IV"],
         disposition="monitored_bed",
-        additional_context="Kernig and Brudzinski signs present. Subarachnoid hemorrhage must be ruled out."
+        additional_context="Kernig and Brudzinski signs present. Subarachnoid hemorrhage must be ruled out.",
+        sentinel_condition="SAH",
     ),
     _case(
         "E003", 52, "F",
@@ -151,7 +155,8 @@ EASY_CASES: List[Dict[str, Any]] = [
         esi=1,
         resources=["IV_ACCESS", "LABS", "ECG", "IMAGING_CT", "BEDSIDE_MONITORING"],
         disposition="resus_bay",
-        additional_context="GCS 10 (E3V3M4). Right facial droop noted. Arm drift on left. NIHSS assessment needed urgently."
+        additional_context="GCS 10 (E3V3M4). Right facial droop noted. Arm drift on left. NIHSS assessment needed urgently.",
+        sentinel_condition="STROKE",
     ),
     _case(
         "E007", 19, "F",
@@ -229,7 +234,8 @@ MEDIUM_CASES: List[Dict[str, Any]] = [
         esi=1,
         resources=["IV_ACCESS", "LABS", "ECG", "BEDSIDE_MONITORING", "MEDICATION_IV"],
         disposition="resus_bay",
-        additional_context="Accessory muscle use, tripod positioning. High suspicion NSTEMI vs flash pulmonary edema."
+        additional_context="Accessory muscle use, tripod positioning. High suspicion NSTEMI vs flash pulmonary edema.",
+        sentinel_condition="NSTEMI",
     ),
     _case(
         "M002", 38, "F",
@@ -243,7 +249,8 @@ MEDIUM_CASES: List[Dict[str, Any]] = [
         esi=1,
         resources=["IV_ACCESS", "LABS", "IMAGING_CT", "SPECIALIST_CONSULT", "MEDICATION_IV"],
         disposition="resus_bay",
-        additional_context="High suspicion ectopic pregnancy. Hemodynamically unstable. Emergent OB consult."
+        additional_context="High suspicion ectopic pregnancy. Hemodynamically unstable. Emergent OB consult.",
+        sentinel_condition="ECTOPIC_PREGNANCY",
     ),
     _case(
         "M003", 44, "M",
@@ -257,7 +264,8 @@ MEDIUM_CASES: List[Dict[str, Any]] = [
         esi=3,
         resources=["LABS", "IMAGING_CT"],
         disposition="monitored_bed",
-        additional_context="Calf circumference 4 cm greater than right. Wells score 3 — high probability DVT/PE workup."
+        additional_context="Calf circumference 4 cm greater than right. Wells score 3 — high probability DVT/PE workup.",
+        sentinel_condition="PE",
     ),
     _case(
         "M004", 29, "F",
@@ -405,7 +413,8 @@ HARD_CASES: List[Dict[str, Any]] = [
         esi=1,
         resources=["IV_ACCESS", "LABS", "ECG", "IMAGING_CT", "BEDSIDE_MONITORING", "MEDICATION_IV"],
         disposition="resus_bay",
-        additional_context="GCS 5. Profound bradycardia. Hypothermia. Unknown etiology — consider overdose, cardiac, metabolic, neurological. Full resuscitation."
+        additional_context="GCS 5. Profound bradycardia. Hypothermia. Unknown etiology — consider overdose, cardiac, metabolic, neurological. Full resuscitation.",
+        sentinel_condition="CARDIAC_ARREST",
     ),
     _case(
         "H004", 27, "F",
@@ -419,7 +428,8 @@ HARD_CASES: List[Dict[str, Any]] = [
         esi=1,
         resources=["IV_ACCESS", "LABS", "ECG", "BEDSIDE_MONITORING", "SPECIALIST_CONSULT"],
         disposition="resus_bay",
-        additional_context="Unknown overdose. QTc prolongation risk. Toxicology screen, acetaminophen level, ECG mandatory. Psychiatric evaluation after medical clearance."
+        additional_context="Unknown overdose. QTc prolongation risk. Toxicology screen, acetaminophen level, ECG mandatory. Psychiatric evaluation after medical clearance.",
+        sentinel_condition="OVERDOSE",
     ),
     _case(
         "H005", 78, "M",
@@ -433,7 +443,8 @@ HARD_CASES: List[Dict[str, Any]] = [
         esi=1,
         resources=["IV_ACCESS", "LABS", "ECG", "IMAGING_XRAY", "BEDSIDE_MONITORING", "MEDICATION_IV"],
         disposition="resus_bay",
-        additional_context="qSOFA 3/3. SOFA score high. Source likely urosepsis. PCN allergy — use aztreonam + metronidazole or meropenem. Hour-1 sepsis bundle."
+        additional_context="qSOFA 3/3. SOFA score high. Source likely urosepsis. PCN allergy — use aztreonam + metronidazole or meropenem. Hour-1 sepsis bundle.",
+        sentinel_condition="SEPSIS",
     ),
     _case(
         "H006", 40, "M",

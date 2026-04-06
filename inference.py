@@ -65,11 +65,17 @@ DISPOSITION: resus_bay (ESI 1), trauma_bay (major trauma), monitored_bed (ESI 2-
 CRITICAL: Under-triage (assigning too high an ESI number) is DANGEROUS. When in doubt,
 assign the LOWER ESI number (higher acuity). Over-triage wastes resources but is safe.
 
+ESCALATION — set this field whenever you suspect a sentinel condition:
+  ACTIVATE_TEAM : immediate team activation (STEMI, STROKE, SEPSIS, CARDIAC ARREST, ECTOPIC, OVERDOSE)
+  ALERT_SENIOR  : alert senior clinician — high suspicion but not yet confirmed (PE, SAH, aortic dissection)
+  NONE          : routine triage, no sentinel condition suspected
+
 Respond in valid JSON only:
 {
   "esi_level": <integer 1-5>,
   "resources_requested": [<ResourceType>, ...],
   "disposition": "<disposition string>",
+  "escalation": "<NONE|ACTIVATE_TEAM|ALERT_SENIOR>",
   "clinical_reasoning": "<brief rationale>"
 }"""
 
@@ -170,10 +176,15 @@ def get_action(client: OpenAI, obs: TriageObservation) -> tuple[TriageAction, Op
     if disposition not in valid_dispositions:
         disposition = "monitored_bed"
 
+    escalation = data.get("escalation", "NONE")
+    if escalation not in ("NONE", "ACTIVATE_TEAM", "ALERT_SENIOR"):
+        escalation = "NONE"
+
     action = TriageAction(
         esi_level=esi,
         resources_requested=resources,
         disposition=disposition,
+        escalation=escalation,
         clinical_reasoning=data.get("clinical_reasoning", ""),
     )
     return action, error
