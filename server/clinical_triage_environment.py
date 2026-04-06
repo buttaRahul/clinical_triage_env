@@ -36,6 +36,7 @@ Scores are normalized to [0.0, 1.0] at episode end.
 
 from __future__ import annotations
 
+import random
 import uuid
 from copy import deepcopy
 from typing import Dict, List, Optional
@@ -218,6 +219,57 @@ def _build_feedback(
 
 
 # ──────────────────────────────────────────────────────────────
+# Realism transforms (applied once per reset, seed-locked)
+# ──────────────────────────────────────────────────────────────
+
+def _apply_realism_transforms(cases: List[Dict], seed: int) -> List[Dict]:
+    """
+    Applies two seed-locked transforms to each patient case:
+
+    1. Vital sign noise — mirrors real ED measurement variance:
+         HR    ± 8 bpm
+         BP    ± 10 mmHg (systolic and diastolic independently)
+         RR    ± 2 breaths/min
+         SpO2  ± 1.5 %   (clamped 70–100)
+         Temp  ± 0.3 °C
+
+    2. PMH omission — 40% of past medical history items dropped.
+       Simulates patients who forget or conceal conditions at intake.
+
+    Ground truth ESI and sentinel_condition are NEVER modified.
+    Same seed always produces the same transforms — reproducible baselines.
+    """
+    rng = random.Random(seed)
+
+    for case in cases:
+        v = case["vitals"]
+
+        # ── Vital sign noise ──────────────────────────────────
+        v["heart_rate"]              = max(20, v["heart_rate"]              + rng.randint(-8, 8))
+        v["blood_pressure_systolic"] = max(40, v["blood_pressure_systolic"] + rng.randint(-10, 10))
+        v["blood_pressure_diastolic"]= max(20, v["blood_pressure_diastolic"]+ rng.randint(-10, 10))
+        v["respiratory_rate"]        = max(4,  v["respiratory_rate"]        + rng.randint(-2, 2))
+        v["spo2_percent"]            = round(
+            min(100.0, max(70.0, v["spo2_percent"] + rng.uniform(-1.5, 1.5))), 1
+        )
+        v["temperature_celsius"]     = round(
+            v["temperature_celsius"] + rng.uniform(-0.3, 0.3), 1
+        )
+
+        # ── PMH omission (40% drop rate per item) ────────────
+        pmh = case.get("past_medical_history", [])
+        if pmh and pmh != ["Unknown"]:
+            case["past_medical_history"] = [
+                item for item in pmh if rng.random() > 0.40
+            ]
+            # Always keep at least one item if list was non-empty
+            if not case["past_medical_history"] and pmh:
+                case["past_medical_history"] = [rng.choice(pmh)]
+
+    return cases
+
+
+# ──────────────────────────────────────────────────────────────
 # Main environment class
 # ──────────────────────────────────────────────────────────────
 
@@ -235,11 +287,12 @@ class ClinicalTriageEnvironment:
     score = env.state.cumulative_reward
     """
 
-    def __init__(self, task: str = "easy"):
+    def __init__(self, task: str = "easy", seed: int = 42):
         if task not in TASK_CONFIGS:
             raise ValueError(f"Unknown task '{task}'. Choose from: {list(TASK_CONFIGS)}")
         self._task_name = task
         self._task_cfg = TASK_CONFIGS[task]
+        self._seed = seed
         self._episode_id: str = ""
         self._cases: List[Dict] = []
         self._queue_index: int = 0
@@ -250,15 +303,19 @@ class ClinicalTriageEnvironment:
         self._under_triage: int = 0
         self._sentinel_total: int = 0
         self._sentinel_correct: int = 0
+        self._had_critical_miss: bool = False
         self._done: bool = False
         self._last_obs: Optional[TriageObservation] = None
 
     # ── OpenEnv interface ───────────────────────────────────────
 
-    def reset(self) -> TriageObservation:
+    def reset(self, seed: Optional[int] = None) -> TriageObservation:
         """Start a fresh episode. Returns observation of first patient."""
+        if seed is not None:
+            self._seed = seed
         self._episode_id = str(uuid.uuid4())[:8]
         self._cases = deepcopy(self._task_cfg["cases"])
+        self._cases = _apply_realism_transforms(self._cases, self._seed)
         self._queue_index = 0
         self._step_count = 0
         self._cumulative_reward = 0.0
@@ -267,6 +324,7 @@ class ClinicalTriageEnvironment:
         self._under_triage = 0
         self._sentinel_total = 0
         self._sentinel_correct = 0
+        self._had_critical_miss = False
         self._done = False
 
         obs = self._make_observation(
@@ -319,6 +377,10 @@ class ClinicalTriageEnvironment:
         elif diff < 0:
             self._over_triage += 1
 
+        # Track critical misses (ESI-1 or ESI-2 under-triaged)
+        if gt_esi in (1, 2) and action.esi_level > gt_esi:
+            self._had_critical_miss = True
+
         # Track sentinel accuracy
         if sentinel:
             self._sentinel_total += 1
@@ -333,6 +395,11 @@ class ClinicalTriageEnvironment:
         # Advance queue
         self._queue_index += 1
         self._done = self._queue_index >= len(self._cases)
+
+        # ── Episode-end bonus ───────────────────────────────────
+        if self._done and not self._had_critical_miss:
+            self._cumulative_reward += 0.5
+            feedback += " | EPISODE BONUS: Zero critical misses — +0.50"
 
         obs = self._make_observation(
             step_reward=step_reward,
