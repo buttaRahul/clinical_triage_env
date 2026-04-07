@@ -1,15 +1,15 @@
 ---
 # OpenEnv Environment Manifest
-# https://github.com/meta-pytorch/OpenEnv
 
 name: clinical-triage-navigator
-version: "1.0.0"
+version: "1.1.0"
 description: >
-  ER triage simulation for AI agent training and evaluation.
+  Emergency department triage simulation for AI agent training and evaluation.
   Agents assign Emergency Severity Index (ESI) levels to synthetic patients,
-  request appropriate resources, and decide patient disposition.
-  Three tasks (easy → medium → hard) with deterministic graders
-  and rich partial-progress reward shaping.
+  request appropriate resources, decide patient disposition, and escalate
+  sentinel conditions (STEMI, sepsis, stroke, PE, etc.).
+  Three tasks with deterministic graders, asymmetric reward design
+  (under-triage penalised 5× over-triage), and seed-locked realism transforms.
 
 author: "Clinical Triage Navigator Contributors"
 license: "Apache-2.0"
@@ -22,6 +22,7 @@ tags:
   - real-world
   - multi-step
   - reward-shaping
+  - sentinel-conditions
 
 # ── API ────────────────────────────────────────────
 action_type: TriageAction
@@ -38,18 +39,29 @@ action_space:
       description: "Emergency Severity Index level (1=most critical, 5=least)"
     resources_requested:
       type: array[string]
-      description: "Resources the patient needs (IV_ACCESS, LABS, ECG, IMAGING_*, etc.)"
-    clinical_reasoning:
-      type: string
-      description: "Free-text rationale (required for hard task scoring)"
+      enum: [IV_ACCESS, LABS, ECG, IMAGING_XRAY, IMAGING_CT, IMAGING_MRI,
+             MEDICATION_IV, MEDICATION_ORAL, SPECIALIST_CONSULT,
+             BEDSIDE_MONITORING, PROCEDURE, NONE]
+      description: "Resources the patient needs (determines ESI 3/4/5 discrimination)"
     disposition:
       type: string
       enum: [resus_bay, trauma_bay, monitored_bed, fast_track, waiting_room]
       description: "Recommended patient placement"
+    escalation:
+      type: string
+      enum: [NONE, ACTIVATE_TEAM, ALERT_SENIOR]
+      description: >
+        Escalation flag for sentinel conditions.
+        ACTIVATE_TEAM: immediate team activation (STEMI, stroke, sepsis, cardiac arrest).
+        ALERT_SENIOR: alert senior clinician — high suspicion not yet confirmed (PE, SAH).
+        NONE: standard triage, no sentinel condition suspected.
+    clinical_reasoning:
+      type: string
+      description: "Free-text rationale. Scored on hard task."
 
 observation_space:
   description: >
-    After each step, the agent receives feedback on its last decision
+    After each step, the agent receives clinical feedback on its last decision
     and the next patient card (or done=true).
   fields:
     current_patient:
@@ -57,10 +69,16 @@ observation_space:
       description: "Patient to triage. Null when episode is complete."
     last_action_feedback:
       type: string
-      description: "Clinical feedback on the previous triage decision"
+      description: "Clinical feedback: ESI accuracy, resources, disposition, sentinel result"
     last_esi_correct:
       type: boolean | null
+    last_esi_assigned:
+      type: integer | null
+    last_esi_ground_truth:
+      type: integer | null
     patients_remaining:
+      type: integer
+    patients_triaged:
       type: integer
     step_reward:
       type: float
@@ -68,43 +86,81 @@ observation_space:
       type: float
     done:
       type: boolean
+    task_name:
+      type: string
+    task_description:
+      type: string
 
 # ── Tasks ──────────────────────────────────────────
 tasks:
   - name: easy
-    description: "Single patient, clear presentations. 10 cases. ESI 1–5 represented."
+    description: >
+      10 patients with clear, unambiguous presentations covering all ESI levels (1–5).
+      Vital signs are seed-perturbed on each reset. No atypical presentations.
+      3 sentinel conditions embedded (STEMI, SAH, STROKE).
     difficulty: easy
     n_cases: 10
-    grader: esi_accuracy + resource_correctness + disposition_accuracy
+    sentinel_cases: 3
+    grader: "0.7 × esi_accuracy + 0.3 × sentinel_accuracy"
+    pass_threshold: 0.60
 
   - name: medium
-    description: "5-patient queue. Mix of emergent and routine cases. Priority ordering matters."
+    description: >
+      10 patients with competing priorities and higher acuity mix.
+      Includes atypical presentations and 3 sentinel conditions
+      (NSTEMI, ectopic pregnancy, PE). PMH randomly omitted 40% per item.
+      Requires correct escalation on time-critical cases.
     difficulty: medium
     n_cases: 10
-    grader: esi_accuracy + under_triage_penalty + resource_correctness
+    sentinel_cases: 3
+    grader: "0.6 × esi_accuracy + 0.4 × sentinel_accuracy"
+    pass_threshold: 0.55
 
   - name: hard
     description: >
-      10-patient mass casualty. Incomplete histories. Ethical complexity.
-      Clinical reasoning scored. Under-triage heavily penalized.
+      10-patient mass casualty scenario with incomplete histories, ethical complexity,
+      and 3 sentinel conditions (cardiac arrest, overdose, sepsis).
+      Clinical reasoning scored. Under-triage of ESI-1/2 heavily penalised.
+      Episode-end bonus for zero critical misses.
     difficulty: hard
     n_cases: 10
-    grader: esi_accuracy + under_triage_penalty + resource_correctness + reasoning_quality
+    sentinel_cases: 3
+    grader: "0.55 × esi_accuracy + 0.45 × sentinel_accuracy + episode_bonus"
+    pass_threshold: 0.45
 
 # ── Reward ─────────────────────────────────────────
 reward:
-  range: [-2.0, 1.70]
+  range: [-5.0, 2.10]
   normalized_range: [0.0, 1.0]
+  note: "Asymmetric design — under-triage penalised 5× harder than over-triage"
   components:
     - name: esi_exact_match
       value: +1.00
-    - name: esi_off_by_1
+    - name: esi_over_triage_1
+      value: +0.50
+      note: "Slight over-triage is safe and rewarded"
+    - name: esi_over_triage_2
+      value: -0.20
+    - name: esi_over_triage_3plus
+      value: -0.50
+    - name: esi_under_triage_1
+      value: -1.00
+      note: "Under-triage is clinically dangerous"
+    - name: esi_under_triage_2
+      value: -2.50
+    - name: esi_under_triage_3plus
+      value: -5.00
+      note: "Critical miss — ESI-1 patient sent to waiting room"
+    - name: sentinel_correct_escalation
       value: +0.40
-    - name: under_triage_1_level
-      value: -0.30
-      note: "Under-triage is clinically dangerous and heavily penalized"
-    - name: under_triage_2_plus
-      value: -0.80 to -1.50
+      note: "ACTIVATE_TEAM or ALERT_SENIOR on a sentinel patient"
+    - name: sentinel_missed
+      value: -3.00
+      note: "No escalation on STEMI/sepsis/stroke/PE/etc."
+    - name: false_escalation_activate
+      value: -0.20
+    - name: false_escalation_alert
+      value: -0.10
     - name: resource_correct
       value: +0.10 per resource
     - name: resource_false_positive
@@ -113,6 +169,9 @@ reward:
       value: +0.20
     - name: idle_penalty
       value: -0.01 per step
+    - name: episode_bonus_zero_critical_misses
+      value: +0.50
+      note: "No ESI-1 or ESI-2 patient under-triaged during full episode"
 
 # ── Deployment ─────────────────────────────────────
 deployment:
@@ -131,10 +190,10 @@ deployment:
 
 # ── Evaluation ─────────────────────────────────────
 evaluation:
-  baseline_model: gpt-4o-mini
+  baseline_model: Qwen/Qwen2.5-72B-Instruct
   baseline_scores:
-    easy: 0.72
-    medium: 0.61
-    hard: 0.48
+    easy: 0.58
+    medium: 0.70
+    hard: 0.72
   score_endpoint: /score
   score_range: [0.0, 1.0]
