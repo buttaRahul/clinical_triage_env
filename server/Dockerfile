@@ -15,7 +15,8 @@ RUN pip install --no-cache-dir \
     uvicorn[standard]==0.30.6 \
     pydantic==2.7.4 \
     httpx==0.27.0 \
-    python-multipart==0.0.9
+    python-multipart==0.0.9 \
+    openai>=1.0.0
 
 # Expose port
 EXPOSE 8000

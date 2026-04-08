@@ -192,8 +192,8 @@ deployment:
 evaluation:
   baseline_model: Qwen/Qwen2.5-72B-Instruct
   baseline_scores:
-    easy: 0.58
-    medium: 0.70
-    hard: 0.72
+    easy: 0.86
+    medium: 0.75
+    hard: 0.89
   score_endpoint: /score
   score_range: [0.0, 1.0]
