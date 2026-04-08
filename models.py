@@ -72,6 +72,7 @@ class PatientCard(BaseModel):
     sentinel_condition: Optional[str] = Field(
         default=None,
         description="Hidden sentinel diagnosis (STEMI/SEPSIS/STROKE/PE/etc). None if not a sentinel case.",
+        exclude=True,
     )
 
 
