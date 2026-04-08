@@ -1,3 +1,15 @@
+---
+title: Clinical Triage Navigator
+emoji: 🏥
+colorFrom: red
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+tags:
+  - openenv
+---
+
 # Clinical Triage Navigator
 
 An OpenEnv-compliant emergency department triage simulation for AI agent training and evaluation. Agents act as triage nurses — assessing synthetic patients, assigning Emergency Severity Index (ESI) levels, requesting resources, routing patients to the correct care area, and escalating sentinel conditions.
