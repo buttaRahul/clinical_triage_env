@@ -469,7 +469,7 @@ class ClinicalTriageEnvironment:
           hard   : 0.55 × esi_accuracy + 0.45 × sentinel_accuracy
         """
         if not self._cases:
-            return 0.0
+            return 0.001
         n = self._queue_index or len(self._cases)
 
         esi_score = self._correct_count / n
