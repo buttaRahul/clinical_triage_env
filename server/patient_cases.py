@@ -447,18 +447,19 @@ HARD_CASES: List[Dict[str, Any]] = [
         sentinel_condition="SEPSIS",
     ),
     _case(
-        "H006", 40, "M",
-        "Chest pain — atypical, low risk features",
-        "40-year-old male with 3 hours of mild chest tightness. Non-radiating. "
-        "No diaphoresis. Resolves partially with antacid. Smoker, no cardiac history.",
-        ["Active smoker"],
-        [],
+        "H006", 76, "F",
+        "Indigestion and fatigue — 2 days",
+        "76-year-old female with 2 days of persistent 'indigestion' not relieved by antacids. "
+        "Also reports fatigue and mild jaw discomfort. Denies chest pain, denies shortness of breath. "
+        "Daughter brought her in because 'something seems off'. No prior cardiac history documented.",
+        ["Type 2 Diabetes", "Hypertension"],
+        ["Metformin", "Amlodipine"],
         ["NKDA"],
-        hr=82, sbp=132, dbp=84, rr=16, spo2=99.0, temp=37.0, gcs=15, pain=4,
-        esi=3,
-        resources=["LABS", "ECG", "BEDSIDE_MONITORING"],
+        hr=94, sbp=148, dbp=88, rr=18, spo2=97.0, temp=37.1, gcs=15, pain=3,
+        esi=2,
+        resources=["LABS", "ECG", "IV_ACCESS", "BEDSIDE_MONITORING"],
         disposition="monitored_bed",
-        additional_context="HEART score 3 — low risk but requires serial troponins and ECG. Atypical presentation in smoker warrants workup."
+        additional_context="Atypical MI presentation — women and diabetics frequently present without chest pain. Jaw pain + fatigue + indigestion in this demographic is cardiac until proven otherwise. Troponin + serial ECG mandatory.",
     ),
     _case(
         "H007", 88, "F",
@@ -475,18 +476,20 @@ HARD_CASES: List[Dict[str, Any]] = [
         additional_context="Valid DNR/DNI. Goals of care conversation needed. Comfort-focused: morphine, anxiolytics, palliative O2. No intubation, no ICU. Chaplain/social work."
     ),
     _case(
-        "H008", 16, "M",
-        "Diabetic ketoacidosis",
-        "16-year-old male with Type 1 DM presenting with polyuria, polydipsia, vomiting x2 days, "
-        "and fruity breath. Parents report he ran out of insulin 4 days ago.",
-        ["Type 1 DM — diagnosed age 8"],
-        ["Insulin glargine — ran out"],
-        ["NKDA"],
-        hr=126, sbp=98, dbp=62, rr=28, spo2=98.0, temp=37.4, gcs=14, pain=5,
+        "H008", 54, "M",
+        "Fatigue and mild confusion — on chemotherapy",
+        "54-year-old male on cycle 3 of R-CHOP chemotherapy for diffuse large B-cell lymphoma. "
+        "Wife reports he has been 'off' for 2 days — more confused than usual, not eating. "
+        "Temperature 37.2. Denies pain. No obvious source of infection identified on exam.",
+        ["DLBCL on active chemotherapy", "HTN"],
+        ["Cyclophosphamide", "Vincristine", "Prednisone", "Rituximab", "Lisinopril"],
+        ["Sulfa drugs"],
+        hr=108, sbp=104, dbp=66, rr=22, spo2=96.0, temp=37.2, gcs=13, pain=1,
         esi=2,
-        resources=["IV_ACCESS", "LABS", "BEDSIDE_MONITORING", "MEDICATION_IV"],
+        resources=["IV_ACCESS", "LABS", "IMAGING_XRAY", "BEDSIDE_MONITORING", "MEDICATION_IV"],
         disposition="monitored_bed",
-        additional_context="Kussmaul respirations. Glucose 520 by paramedics. pH and bicarb critical. DKA protocol: fluids, insulin drip, potassium replacement. Endocrine consult."
+        additional_context="Immunocompromised patients cannot mount a fever — afebrile sepsis is common in neutropenic patients. ANC likely critically low. Any infection is life-threatening. Treat as sepsis: blood cultures x2, broad-spectrum antibiotics within 1 hour, aggressive IV fluids.",
+        sentinel_condition="SEPSIS",
     ),
     _case(
         "H009", 50, "F",

@@ -119,12 +119,13 @@ tasks:
   - name: hard
     description: >
       10-patient mass casualty scenario with incomplete histories, ethical complexity,
-      and 3 sentinel conditions (cardiac arrest, overdose, sepsis).
-      Clinical reasoning scored. Under-triage of ESI-1/2 heavily penalised.
-      Episode-end bonus for zero critical misses.
+      and 4 sentinel conditions (cardiac arrest, overdose, sepsis shock, afebrile sepsis).
+      Includes deceptive presentations: elderly MI without chest pain, afebrile sepsis
+      in immunocompromised patient. Clinical reasoning scored.
+      Under-triage of ESI-1/2 heavily penalised. Episode-end bonus for zero critical misses.
     difficulty: hard
     n_cases: 10
-    sentinel_cases: 3
+    sentinel_cases: 4
     grader: "0.55 × esi_accuracy + 0.45 × sentinel_accuracy + episode_bonus"
     pass_threshold: 0.45
 
@@ -176,8 +177,8 @@ reward:
 # ── Deployment ─────────────────────────────────────
 deployment:
   sdk: docker
-  port: 8000
-  app_port: 8000
+  port: 7860
+  app_port: 7860
   base_path: /web
   env_vars:
     TRIAGE_TASK:

@@ -157,6 +157,85 @@ def _disposition_reward(assigned: str, ground_truth: str) -> float:
     return 0.20 if assigned == ground_truth else 0.0
 
 
+# Clinical keywords that indicate quality reasoning per ESI level
+_ESI_KEYWORDS = {
+    1: {"resuscitation", "immediate", "life-saving", "gcs", "shock", "unresponsive",
+        "spo2", "hypotension", "arrest", "intubat", "airway", "agonal"},
+    2: {"emergent", "high-risk", "deteriorat", "time-critical", "stemi", "stroke",
+        "sepsis", "ectopic", "dissect", "pe ", "pulmonary embolism", "sah",
+        "meningitis", "overdose", "anaphylax"},
+    3: {"urgent", "workup", "stable", "monitor", "rule out", "troponin", "dvt",
+        "fracture", "migraine", "moderate"},
+    4: {"less-urgent", "minor", "single resource", "fast track", "sprain", "laceration"},
+    5: {"non-urgent", "no resources", "exam only", "viral", "prescription", "follow-up"},
+}
+_SENTINEL_KEYWORDS = {
+    "STEMI":           {"stemi", "st elevation", "mi ", "myocardial"},
+    "STROKE":          {"stroke", "cva", "tpa", "tissue plasminogen", "facial droop", "aphasia"},
+    "SEPSIS":          {"sepsis", "septic", "infection", "lactate", "blood culture"},
+    "PE":              {"pe ", "pulmonary embolism", "dvt", "d-dimer", "wells"},
+    "SAH":             {"sah", "subarachnoid", "thunderclap", "worst headache"},
+    "CARDIAC_ARREST":  {"arrest", "cpr", "resuscitat", "pulseless"},
+    "OVERDOSE":        {"overdose", "toxicology", "naloxone", "charcoal", "poison"},
+    "NSTEMI":          {"nstemi", "troponin", "acs", "acute coronary"},
+    "ECTOPIC_PREGNANCY": {"ectopic", "beta hcg", "rupture", "fallopian"},
+}
+
+
+def _reasoning_reward(reasoning: str, gt_esi: int, sentinel: Optional[str]) -> float:
+    """
+    Score clinical reasoning by keyword relevance rather than length.
+
+    +0.10  Contains ESI-level-appropriate clinical keywords
+    +0.10  References sentinel condition by name/synonym (if applicable)
+    +0.10  Mentions at least one vital sign or objective finding
+    Max:   +0.30
+    """
+    text = reasoning.lower()
+    score = 0.0
+
+    # ESI-appropriate keyword hit
+    keywords = _ESI_KEYWORDS.get(gt_esi, set())
+    if any(kw in text for kw in keywords):
+        score += 0.10
+
+    # Sentinel mention
+    if sentinel and sentinel in _SENTINEL_KEYWORDS:
+        if any(kw in text for kw in _SENTINEL_KEYWORDS[sentinel]):
+            score += 0.10
+
+    # Objective finding — vitals or labs referenced
+    objective_terms = {"bp", "heart rate", "hr ", "spo2", "gcs", "rr ", "temp",
+                       "systolic", "diastolic", "o2", "oxygen", "troponin",
+                       "lactate", "glucose", "ecg", "ekg"}
+    if any(t in text for t in objective_terms):
+        score += 0.10
+
+    return score
+
+
+def _vital_concordance_bonus(action: TriageAction, case: dict) -> float:
+    """
+    +0.20 bonus when vitals unambiguously indicate ESI 1 and the agent correctly
+    identifies it. Rewards agents that use objective data, not just chief complaint.
+
+    Triggers when ALL of the following hold:
+      • Ground truth ESI is 1
+      • Agent assigned ESI 1
+      • At least one hard physiologic marker is present:
+          SBP < 90  OR  SpO2 < 90%  OR  GCS ≤ 10
+    """
+    if case.get("ground_truth_esi") != 1 or action.esi_level != 1:
+        return 0.0
+    v = case["vitals"]
+    hard_marker = (
+        v.get("blood_pressure_systolic", 120) < 90
+        or v.get("spo2_percent", 99) < 90.0
+        or v.get("gcs_score", 15) <= 10
+    )
+    return 0.20 if hard_marker else 0.0
+
+
 def _build_feedback(
     action: TriageAction,
     gt_esi: int,
@@ -165,6 +244,7 @@ def _build_feedback(
     step_reward: float,
     sentinel: Optional[str] = None,
     r_sentinel: float = 0.0,
+    r_concordance: float = 0.0,
 ) -> str:
     lines = []
     diff = action.esi_level - gt_esi
@@ -213,6 +293,9 @@ def _build_feedback(
             )
     elif action.escalation != "NONE":
         lines.append(f"FALSE ESCALATION: No sentinel condition — {action.escalation} penalty ({r_sentinel:+.1f})")
+
+    if r_concordance > 0:
+        lines.append(f"VITAL CONCORDANCE BONUS: Correctly identified ESI 1 from objective markers ({r_concordance:+.2f})")
 
     lines.append(f"Step reward: {step_reward:+.2f}")
     return " | ".join(lines)
@@ -351,17 +434,20 @@ class ClinicalTriageEnvironment:
         sentinel: Optional[str] = current_case.get("sentinel_condition")
 
         # ── Compute reward ──────────────────────────────────────
-        r_esi        = _esi_accuracy_reward(action.esi_level, gt_esi)
-        r_sentinel   = _sentinel_reward(sentinel, action.escalation)
-        r_resources  = _resource_reward(action.resources_requested, gt_resources)
+        r_esi         = _esi_accuracy_reward(action.esi_level, gt_esi)
+        r_sentinel    = _sentinel_reward(sentinel, action.escalation)
+        r_resources   = _resource_reward(action.resources_requested, gt_resources)
         r_disposition = _disposition_reward(action.disposition, gt_disposition)
-        r_idle       = -0.01  # per-step efficiency penalty
+        r_concordance = _vital_concordance_bonus(action, current_case)
+        r_idle        = -0.01  # per-step efficiency penalty
 
-        step_reward = r_esi + r_sentinel + r_resources + r_disposition + r_idle
+        step_reward = r_esi + r_sentinel + r_resources + r_disposition + r_concordance + r_idle
 
-        # Hard task: bonus for good clinical reasoning (length + keyword heuristic)
+        # Hard task: bonus for clinical reasoning that references relevant findings
         if self._task_name == "hard" and action.clinical_reasoning:
-            reasoning_score = min(0.30, len(action.clinical_reasoning) / 400 * 0.30)
+            reasoning_score = _reasoning_reward(
+                action.clinical_reasoning, gt_esi, sentinel
+            )
             step_reward += reasoning_score
 
         self._cumulative_reward += step_reward
@@ -389,7 +475,7 @@ class ClinicalTriageEnvironment:
 
         feedback = _build_feedback(
             action, gt_esi, gt_resources, gt_disposition, step_reward,
-            sentinel=sentinel, r_sentinel=r_sentinel,
+            sentinel=sentinel, r_sentinel=r_sentinel, r_concordance=r_concordance,
         )
 
         # Advance queue
