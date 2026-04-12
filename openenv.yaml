@@ -131,7 +131,7 @@ tasks:
 # ── Reward ─────────────────────────────────────────
 reward:
   range: [-5.0, 2.10]
-  normalized_range: [0.0, 1.0]
+  normalized_range: [0.001, 0.999]
   note: "Asymmetric design — under-triage penalised 5× harder than over-triage"
   components:
     - name: esi_exact_match
@@ -196,4 +196,4 @@ evaluation:
     medium: 0.75
     hard: 0.89
   score_endpoint: /score
-  score_range: [0.0, 1.0]
+  score_range: [0.001, 0.999]
