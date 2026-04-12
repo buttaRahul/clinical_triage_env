@@ -487,4 +487,4 @@ class ClinicalTriageEnvironment:
         else:  # hard
             combined = 0.55 * esi_score + 0.45 * sentinel_score
 
-        return round(min(1.0, max(0.0, combined)), 4)
+        return round(min(0.999, max(0.001, combined)), 4)
