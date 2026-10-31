@@ -1,7 +1,0 @@
-pyproject.toml
-clinical_triage_navigator.egg-info/PKG-INFO
-clinical_triage_navigator.egg-info/SOURCES.txt
-clinical_triage_navigator.egg-info/dependency_links.txt
-clinical_triage_navigator.egg-info/requires.txt
-clinical_triage_navigator.egg-info/top_level.txt
-tests/test_triage_env.py

@@ -46,6 +46,8 @@ Each episode presents a queue of 10 synthetic patients. For each patient the age
 
 Some patients have hidden sentinel conditions (STEMI, stroke, sepsis, PE, etc.) that require explicit escalation independent of ESI level. A patient can have the correct ESI assigned but still miss the sentinel — and vice versa. These are scored separately.
 
+Each task has 10 hand-written patient cases (30 in total). Noise and PMH omission vary each presentation, but the underlying cases are fixed, so one patient moves ESI accuracy by 0.1 and scores are coarse.
+
 ---
 
 ## Action Space
@@ -122,7 +124,7 @@ Returned after every `reset()` and `step()`:
 **Pass threshold:** 0.55 | **Baseline (Qwen2.5-72B):** 0.75
 
 ### hard
-10-patient mass casualty scenario designed to challenge frontier models. What makes it hard:
+10-patient mass casualty scenario, intended as the hardest task. What is meant to make it hard:
 - Patients with deceptive presentations: elderly MI presenting as fatigue and jaw pain (no chest pain), overdose with normal initial vitals, sepsis in an immunosuppressed patient with no fever
 - Incomplete histories and unknown medication lists
 - Ethical complexity: DNR patients in cardiac arrest, unconscious patients with no ID
@@ -130,7 +132,7 @@ Returned after every `reset()` and `step()`:
 - 3 sentinel conditions: cardiac arrest, overdose, sepsis shock
 - Episode-end bonus (+0.5) for zero critical misses
 
-**Grader:** `0.55 x ESI accuracy + 0.45 x sentinel accuracy + episode_bonus`
+**Grader:** `0.55 x ESI accuracy + 0.45 x sentinel accuracy` (the episode bonus and reasoning score add to the cumulative reward, not to this score)
 **Pass threshold:** 0.45 | **Baseline (Qwen2.5-72B):** 0.89
 
 ---
@@ -226,6 +228,8 @@ Evaluated with `Qwen/Qwen2.5-72B-Instruct` via HuggingFace inference router, tem
 | medium | 0.75 | Atypical presentations and PMH omissions cause some misses |
 | hard | 0.89 | Sentinel conditions (cardiac arrest, sepsis) correctly escalated |
 
+The hard task currently scores above medium. Its deceptive cases are not yet hard enough to separate a 72B model, so harder hard-task cases are listed under Future Work.
+
 ---
 
 ## Project Structure
@@ -247,6 +251,10 @@ clinical-triage-navigator/
 ---
 
 ## Future Work
+
+**Harder hard task**
+
+The 72B baseline scores 0.89 on hard and 0.75 on medium, so hard does not yet do its job. More cases with atypical presentations, conflicting vitals and missing history should bring its score below medium.
 
 **Dataset Integration**
 
